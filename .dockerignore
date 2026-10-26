@@ -1,0 +1,11 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+backend/models
+backend/data
+backend/eval/results
+backend/try_output
+backend/.deploy.env
+frontend/dist
+photos

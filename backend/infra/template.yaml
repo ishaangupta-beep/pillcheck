@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  PillCheck: camera-verified medication adherence (OpenCV 5 + agent) on a
+  serverless, pay-per-use stack. Lambda (arm64 container) behind a Function URL,
+  DynamoDB, S3, SNS, EventBridge Scheduler, Bedrock, CloudWatch.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI of the Lambda container (pushed by deploy.sh).
+  ApiToken:
+    Type: String
+    NoEcho: true
+    MinLength: 20
+    Description: Admin bearer token. Without it, visitors only reach demo sessions.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Email that receives caregiver alerts (confirm the SNS subscription email).
+  BedrockModelId:
+    Type: String
+    Default: ""
+    Description: Bedrock model or inference profile for the agent planner. Empty = rule planner only (no AI cost).
+  BedrockDailyCap:
+    Type: Number
+    Default: 300
+    Description: Max agent runs per day that may call Bedrock; beyond it the free rule planner is used.
+  GlobalChecksPerDay:
+    Type: Number
+    Default: 1500
+    Description: Max photo checks per day across all visitors.
+  ReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: Reserved concurrency (hard cap on parallel executions). 0 = not set; new accounts often cannot reserve any.
+  MemoryMB:
+    Type: Number
+    Default: 3008
+    AllowedValues: [2048, 3008, 4096]
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasBedrock: !Not [!Equals [!Ref BedrockModelId, ""]]
+  HasReserved: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+
+Resources:
+  # ------------------------------------------------------------- data
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+        - {AttributeName: gpk, AttributeType: S}
+        - {AttributeName: gsk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      GlobalSecondaryIndexes:
+        - IndexName: by_patient
+          KeySchema:
+            - {AttributeName: gpk, KeyType: HASH}
+            - {AttributeName: gsk, KeyType: RANGE}
+          Projection: {ProjectionType: ALL}
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-after-90-days
+            Status: Enabled
+            ExpirationInDays: 90
+
+  BucketTlsOnly:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt Bucket.Arn, !Sub "${Bucket.Arn}/*"]
+            Condition: {Bool: {"aws:SecureTransport": "false"}}
+
+  # ------------------------------------------------------------- alerts
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: PillCheck alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ------------------------------------------------------------- compute
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}"
+      RetentionInDays: 14
+
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pillcheck-least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${LogGroup.Arn}:*"
+              - Sid: Records
+                Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
+                Resource: [!GetAtt Table.Arn, !Sub "${Table.Arn}/index/*"]
+              - Sid: Photos
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub "${Bucket.Arn}/*"
+              - Sid: Alerts
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+              - !If
+                - HasBedrock
+                - Sid: Planner
+                  Effect: Allow
+                  Action: [bedrock:InvokeModel]
+                  Resource:
+                    - "arn:aws:bedrock:*::foundation-model/*"
+                    - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
+                - !Ref AWS::NoValue
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref AWS::StackName
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      Architectures: [arm64]
+      MemorySize: !Ref MemoryMB
+      Timeout: 60
+      Role: !GetAtt FunctionRole.Arn
+      ReservedConcurrentExecutions: !If [HasReserved, !Ref ReservedConcurrency, !Ref AWS::NoValue]
+      LoggingConfig: {LogGroup: !Ref LogGroup, LogFormat: Text}
+      Environment:
+        Variables:
+          PILLCHECK_STORAGE: aws
+          PILLCHECK_DDB_TABLE: !Ref Table
+          PILLCHECK_S3_BUCKET: !Ref Bucket
+          PILLCHECK_SNS_TOPIC_ARN: !If [HasEmail, !Ref AlertTopic, ""]
+          PILLCHECK_API_TOKEN: !Ref ApiToken
+          PILLCHECK_BEDROCK_MODEL_ID: !Ref BedrockModelId
+          PILLCHECK_BEDROCK_DAILY_CAP: !Ref BedrockDailyCap
+          PILLCHECK_GLOBAL_CHECKS_PER_DAY: !Ref GlobalChecksPerDay
+          PILLCHECK_MAX_UPLOAD_MB: "4"
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Function.Arn
+      AuthType: NONE
+      # CORS is handled by the app (FastAPI middleware); configuring it here too
+      # would send duplicate Access-Control-Allow-Origin headers.
+
+  # Public function URLs need both statements (AWS change, October 2025).
+  UrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  UrlFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ------------------------------------------------------------- scheduler
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}}
+      Policies:
+        - PolicyName: invoke-pillcheck
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt Function.Arn
+
+  TickSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Reminders, missed-dose alerts and refill checks every 15 minutes
+      ScheduleExpression: rate(15 minutes)
+      FlexibleTimeWindow: {Mode: "OFF"}
+      Target:
+        Arn: !GetAtt Function.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"pillcheck": "tick"}'
+        RetryPolicy: {MaximumRetryAttempts: 1}
+
+  # ------------------------------------------------------------- observability
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: PillCheck Lambda errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref Function}]
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Ref AWS::StackName
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Requests and errors","region":"${AWS::Region}","stat":"Sum","period":300,
+            "metrics":[["AWS/Lambda","Invocations","FunctionName","${Function}"],[".","Errors",".","."],[".","Throttles",".","."]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Latency (ms)","region":"${AWS::Region}","period":300,
+            "metrics":[["AWS/Lambda","Duration","FunctionName","${Function}",{"stat":"p50"}],["...",{"stat":"p95"}]]}},
+          {"type":"log","x":0,"y":6,"width":12,"height":7,"properties":{"title":"Agent decisions (last 24 h)","region":"${AWS::Region}",
+            "query":"SOURCE '${LogGroup}' | filter @message like /agent_run/ | parse @message '\"mode\": \"*\"' as mode | stats count(*) by mode","view":"table"}},
+          {"type":"log","x":12,"y":6,"width":12,"height":7,"properties":{"title":"HTTP status by path","region":"${AWS::Region}",
+            "query":"SOURCE '${LogGroup}' | filter @message like /\"event\": \"http\"/ | parse @message '\"path\": \"*\", \"status\": *,' as path, status | stats count(*) by status, path | sort count(*) desc | limit 20","view":"table"}},
+          {"type":"log","x":0,"y":13,"width":24,"height":6,"properties":{"title":"Recent agent runs","region":"${AWS::Region}",
+            "query":"SOURCE '${LogGroup}' | filter @message like /agent_run|scheduled_task/ | fields @timestamp, @message | sort @timestamp desc | limit 25","view":"table"}}
+        ]}
+
+Outputs:
+  ApiUrl:
+    Description: Public base URL of the PillCheck API
+    Value: !GetAtt FunctionUrl.FunctionUrl
+  TableName:
+    Value: !Ref Table
+  BucketName:
+    Value: !Ref Bucket
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  DashboardUrl:
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}"

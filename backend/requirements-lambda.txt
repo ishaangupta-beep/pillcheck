@@ -1,0 +1,7 @@
+opencv-contrib-python-headless==5.0.0.93
+numpy==2.5.4
+fastapi==0.150.0
+pydantic==2.14.1
+python-multipart==0.0.32
+boto3==1.43.115
+mangum==0.22.0

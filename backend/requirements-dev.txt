@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest==9.1.1
+httpx==0.28.1
+moto[dynamodb,s3]==5.2.4
+mangum==0.22.0
+cfn-lint==1.57.2
