@@ -5,7 +5,9 @@ The story (patient in Asia/Kolkata, 21 Oct 2026):
 """
 from conftest import METF, OTHER, TELMI, photo
 
-DAY = "2026-10-21T{}:00+05:30"
+from datetime import date as _date, timedelta as _td
+# Tomorrow: doses before a medication was created are ignored, so the test day must be after "now".
+DAY = (_date.today() + _td(days=1)).isoformat() + "T{}:00+05:30"
 
 
 def at(hhmm: str) -> str:

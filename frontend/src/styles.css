@@ -179,3 +179,27 @@ img { display: block; max-width: 100%; }
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 100%; padding: 4px; border-radius: 14px; background: var(--bg-sunken); }
 .segmented button { border: 0; background: transparent; padding: 10px 6px; border-radius: 10px; font: inherit; font-size: 15px; font-weight: 600; color: var(--text-secondary); cursor: pointer; min-height: 44px; }
 .segmented button.on { background: var(--bg-surface); color: var(--brand); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+
+/* ---------------- guided demo (judges) */
+.tour { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: 12px; max-width: 440px; margin: 0 auto;
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 10px 30px rgba(23,35,43,.18);
+  max-height: 70dvh; overflow: auto; }
+.tour-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 0; background: none;
+  font: inherit; text-align: left; cursor: pointer; color: var(--text-primary); position: sticky; top: 0; background: var(--bg-surface); }
+.tour-head .t-strong { flex: 1; font-size: 15px; }
+.tour-badge { background: var(--brand); color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.tour-steps { list-style: none; margin: 0; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.tour-steps li { display: flex; gap: 12px; opacity: .55; }
+.tour-steps li.next, .tour-steps li.done { opacity: 1; }
+.tour-num { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  background: var(--bg-sunken); color: var(--text-secondary); }
+.tour-steps li.next .tour-num { background: var(--brand); color: #fff; }
+.tour-steps li.done .tour-num { background: var(--taken-bg); color: var(--taken); }
+.tour-body { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.tour-look { background: var(--brand-soft); color: var(--text-primary); padding: 8px 10px; border-radius: 10px; }
+.tour-body .btn { align-self: flex-start; width: auto; padding-left: 18px; padding-right: 18px; }
+.app:has(.tour.open) .screen { padding-bottom: 72dvh; }
+@media (min-width: 1100px) {
+  .tour { left: 24px; right: auto; top: 96px; bottom: auto; width: 380px; max-height: calc(100dvh - 120px); margin: 0; }
+  .app:has(.tour.open) .screen { padding-bottom: 32px; }
+}

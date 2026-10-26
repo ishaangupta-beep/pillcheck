@@ -36,7 +36,7 @@ def _template_id() -> str:
     digest = hashlib.sha1(json.dumps(m["medications"], sort_keys=True).encode())
     for med in m["medications"]:
         digest.update((ASSETS / med["reference"]).read_bytes())
-    digest.update(b"template-v2:expiry")
+    digest.update(b"template-v3:real-photos")
     return f"demo_template_{digest.hexdigest()[:12]}"
 
 
@@ -53,6 +53,13 @@ def ensure_template(store: Store) -> dict:
         refs = {}
         for med in manifest()["medications"]:
             reg = pipeline.register_reference((ASSETS / med["reference"]).read_bytes())
+            if med.get("pockets"):  # labelled pockets shipped with real demo photos
+                from .vision.annotate import encode_jpeg, reference_preview
+                from .vision.pockets import Pocket, detect_strip_polygon
+                reg["pockets"] = [Pocket.from_dict(p) for p in med["pockets"]]
+                reg["pocket_confidence"] = 1.0
+                reg["strip_polygon"] = detect_strip_polygon(reg["image"], reg["pockets"])
+                reg["preview_jpeg"] = encode_jpeg(reference_preview(reg["image"], reg["pockets"], reg["strip_polygon"]))
             fake_med = {"id": f"template_{med['key']}", "patient_id": tid}
             ref = domain.save_reference(store, fake_med, reg)
             refs[med["key"]] = {k: ref[k] for k in ("pockets", "pocket_confidence", "strip_polygon", "image_size",

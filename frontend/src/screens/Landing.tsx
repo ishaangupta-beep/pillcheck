@@ -28,9 +28,9 @@ export default function Landing({ go }: { go: (to: string) => void }) {
         <div className="badge ok" style={{ width: 52, height: 52 }}><Icon name="pill" size={26} /></div>
         <p className="t-label brand">OpenCV AI Competition 2026</p>
       </div>
-      <h1 className="t-display">Know Mum took her medicine, without asking.</h1>
+      <h1 className="t-display">Be there for every dose, even from miles away.</h1>
       <p className="t-body muted">
-        After each dose, she photographs her medicine strip. PillCheck uses OpenCV&nbsp;5 to see which pocket was emptied,
+        After each dose, your parent photographs the medicine strip. PillCheck uses OpenCV&nbsp;5 to see which pocket was emptied,
         records the dose, and tells you only when something needs attention: a missed dose, a double dose or the wrong medicine.
       </p>
 

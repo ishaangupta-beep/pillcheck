@@ -5,7 +5,9 @@ from conftest import TELMI, photo
 from pillcheck.vision import expiry
 from pillcheck.vision.expiry import normalise, parse_expiry, status
 
-DAY = "2026-10-22T{}:00+05:30"
+from datetime import date as _date, timedelta as _td
+# Tomorrow: doses before a medication was created are ignored, so the test day must be after "now".
+DAY = (_date.today() + _td(days=1)).isoformat() + "T{}:00+05:30"
 
 
 @pytest.mark.parametrize("words,date", [

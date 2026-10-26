@@ -24,7 +24,12 @@ _DOSING_ADVICE = [
 ]
 
 
+_PHOTO_PHRASE = re.compile(r"\b(take|send|click)\b[^.!?]{0,25}\b(photos?|pictures?|pics?|shots?)\b", re.I)
+
+
 def gives_dosing_advice(text: str) -> bool:
+    # "Please take one more photo" is a capture instruction, not a dose.
+    text = _PHOTO_PHRASE.sub(" ", text)
     return any(p.search(text) for p in _DOSING_ADVICE)
 
 

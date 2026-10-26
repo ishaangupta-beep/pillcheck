@@ -11,7 +11,9 @@ from pillcheck.agent.context import AgentContext
 from pillcheck.config import settings
 from pillcheck.storage import get_store
 
-DAY = "2026-10-22T{}:00+05:30"
+from datetime import date as _date, timedelta as _td
+# Tomorrow: doses before a medication was created are ignored, so the test day must be after "now".
+DAY = (_date.today() + _td(days=1)).isoformat() + "T{}:00+05:30"
 
 
 def at(hhmm):
@@ -89,7 +91,7 @@ def test_unclear_twice_escalates_to_caregiver_review(plain_patient):
     assert review["status"] == "pending_approval" and review["payload"]["kind"] == "confirm_dose"
     # Caregiver confirms -> the 09:00 dose is recorded.
     service.decide_action(store, review["id"], True, "saw her take it", at=at("09:30"))
-    slot = store.get("doses", domain.slot_id(med["id"], datetime(2026, 10, 22).date(), "09:00"))
+    slot = store.get("doses", domain.slot_id(med["id"], datetime.fromisoformat(at("09:30")).date(), "09:00"))
     assert slot["status"] == "taken"
 
 
