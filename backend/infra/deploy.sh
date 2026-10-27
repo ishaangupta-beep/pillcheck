@@ -40,7 +40,7 @@ if [[ -z "${ALERT_EMAIL+x}" ]]; then
 fi
 
 # ---------------------------------------------------------------- Lambda concurrency
-LIMIT="$(aws lambda get-account-settings --region "$REGION" --query AccountLimit.ConcurrentExecutions --output text)"
+LIMIT="$(aws lambda get-account-settings --region "$REGION" --query AccountLimit.ConcurrentExecutions --output text 2>/dev/null || echo 10)"
 if (( LIMIT > 20 )); then RESERVED=2; else RESERVED=0; fi
 
 # ---------------------------------------------------------------- the plan

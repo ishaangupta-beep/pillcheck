@@ -1,0 +1,8 @@
+# Hugging Face Space. OpenCV 5 pinned; the web stack follows Gradio's own pins.
+opencv-contrib-python-headless==5.0.0.93
+numpy==2.5.4
+fastapi
+uvicorn
+pydantic
+python-multipart
+boto3
